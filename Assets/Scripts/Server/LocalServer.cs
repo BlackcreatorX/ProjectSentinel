@@ -6,15 +6,16 @@ public class LocalServer : MonoBehaviour
     [Header("References")]
     [SerializeField] private CentralMediator mediator;
 
-    [Header("Server Configuration")]
+    [Header("Movement Rules")]
     [SerializeField] private float maxSpeed = 5f;
-    [SerializeField] private Vector3 initialPosition;
+    [SerializeField] private Vector2 mapLimits = new Vector2(5f, 5f);
+    [SerializeField] private float fixedHeight = 1.5f;
 
     private Vector3 authoritativePosition;
 
     private void Awake()
     {
-        authoritativePosition = initialPosition;
+        authoritativePosition = new Vector3(0f, fixedHeight, 0f);
     }
 
     private void OnEnable()
@@ -29,12 +30,14 @@ public class LocalServer : MonoBehaviour
 
     private void ProcessMovement(MovementRequest request)
     {
-        // Limitar la intensidad de la intención.
-        Vector2 direction = Vector2.ClampMagnitude(
-            request.Direction, 1f
-        );
+        Vector2 direction = request.Direction;
 
-        // El servidor calcula el desplazamiento.
+        // Validar intensidad de entrada.
+        bool invalidInput = direction.magnitude > 1.01f;
+
+        direction = Vector2.ClampMagnitude(direction, 1f);
+
+        // Calcular destino desde el estado autoritativo.
         Vector3 displacement = new Vector3(
             direction.x,
             0f,
@@ -44,12 +47,32 @@ public class LocalServer : MonoBehaviour
         Vector3 nextPosition = authoritativePosition +
             displacement * maxSpeed * Time.fixedDeltaTime;
 
-        // Actualizar el estado autoritativo.
+        // Corregir límites del escenario.
+        nextPosition.x = Mathf.Clamp(
+            nextPosition.x, -mapLimits.x, mapLimits.x
+        );
+
+        nextPosition.z = Mathf.Clamp(
+            nextPosition.z, -mapLimits.y, mapLimits.y
+        );
+
+        nextPosition.y = fixedHeight;
+
+        // Detectar anomalías.
+        if (invalidInput)
+        {
+            Debug.LogWarning("[Server] Invalid movement detected.");
+
+            mediator.Publish(new MovementRejected(
+                authoritativePosition,
+                "Movement intensity exceeded"
+            ));
+
+            return;
+        }
+
         authoritativePosition = nextPosition;
 
-        // Autorizar el movimiento mediante el Mediador.
-        mediator.Publish(
-            new MovementApproved(authoritativePosition)
-        );
+        mediator.Publish(new MovementApproved(authoritativePosition));
     }
 }
